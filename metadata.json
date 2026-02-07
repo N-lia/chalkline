@@ -1,0 +1,8 @@
+
+{
+  "name": "Chalkline",
+  "description": "High-contrast technical animation workspace for explanation and procedural generation.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
