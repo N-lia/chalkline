@@ -208,7 +208,15 @@ async def search_manim_web(query: str) -> str:
         return f"Error searching documentation: {str(e)}"
 
 
-# Synchronous wrapper tools for the agent
+# ============================================================
+# SYNCHRONOUS TOOL FUNCTIONS (used by the agent)
+# ============================================================
+# These use pure synchronous requests to avoid async conflicts
+# with LiteLLM/OpenAI clients.
+
+import requests
+from bs4 import BeautifulSoup
+
 def query_manim_docs(class_name: str) -> str:
     """
     Tool function - gets Manim documentation from the web.
@@ -219,15 +227,67 @@ def query_manim_docs(class_name: str) -> str:
     Returns:
         Formatted documentation string from docs.manim.community
     """
-    import asyncio
+    # Common class to module mapping for faster lookups
+    class_module_map = {
+        'Circle': 'reference/manim.mobject.geometry.arc.Circle',
+        'Square': 'reference/manim.mobject.geometry.polygram.Square',  
+        'Rectangle': 'reference/manim.mobject.geometry.polygram.Rectangle',
+        'Line': 'reference/manim.mobject.geometry.line.Line',
+        'Arrow': 'reference/manim.mobject.geometry.line.Arrow',
+        'Dot': 'reference/manim.mobject.geometry.arc.Dot',
+        'Text': 'reference/manim.mobject.text.text_mobject.Text',
+        'MathTex': 'reference/manim.mobject.text.tex_mobject.MathTex',
+        'Tex': 'reference/manim.mobject.text.tex_mobject.Tex',
+        'Create': 'reference/manim.animation.creation.Create',
+        'Write': 'reference/manim.animation.creation.Write',
+        'FadeIn': 'reference/manim.animation.fading.FadeIn',
+        'FadeOut': 'reference/manim.animation.fading.FadeOut',
+        'Transform': 'reference/manim.animation.transform.Transform',
+        'ReplacementTransform': 'reference/manim.animation.transform.ReplacementTransform',
+        'Axes': 'reference/manim.mobject.graphing.coordinate_systems.Axes',
+        'NumberPlane': 'reference/manim.mobject.graphing.coordinate_systems.NumberPlane',
+        'VGroup': 'reference/manim.mobject.types.vectorized_mobject.VGroup',
+        'Scene': 'reference/manim.scene.scene.Scene',
+    }
     
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(fetch_manim_class_docs(class_name))
+        if class_name in class_module_map:
+            url = f"https://docs.manim.community/en/stable/{class_module_map[class_name]}.html"
+        else:
+            # Try generic search
+            url = f"https://docs.manim.community/en/stable/reference/manim.mobject.mobject.Mobject.html"
+        
+        response = requests.get(url, timeout=10, headers={'User-Agent': 'ManimCoder/1.0'})
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Get class description
+            desc = ""
+            desc_elem = soup.find('dd', class_='field-body')
+            if desc_elem:
+                desc = desc_elem.get_text(strip=True)[:500]
+            
+            # Get parameters
+            params = []
+            param_section = soup.find('dl', class_='py parameter')
+            if param_section:
+                for dt in param_section.find_all('dt')[:5]:
+                    params.append(dt.get_text(strip=True))
+            
+            output = f"# {class_name} Documentation (from docs.manim.community)\n\n"
+            output += f"**Description:** {desc if desc else 'See full documentation'}\n\n"
+            if params:
+                output += "**Parameters:**\n"
+                for p in params:
+                    output += f"- {p}\n"
+            output += f"\n**Full documentation:** {url}\n"
+            return output
+        else:
+            return f"# {class_name}\n\nCheck https://docs.manim.community for documentation."
+            
+    except Exception as e:
+        return f"# {class_name}\n\nDocumentation lookup failed: {str(e)}\nUse standard Manim syntax."
 
 
 def search_manim_docs(keyword: str) -> str:
@@ -240,28 +300,54 @@ def search_manim_docs(keyword: str) -> str:
     Returns:
         List of matching classes with links
     """
-    import asyncio
-    
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(search_manim_web(keyword))
+        # Use DuckDuckGo-style search URL for Manim docs
+        search_url = f"https://docs.manim.community/en/stable/search.html?q={keyword}"
+        
+        response = requests.get(
+            f"https://docs.manim.community/en/stable/genindex.html",
+            timeout=10,
+            headers={'User-Agent': 'ManimCoder/1.0'}
+        )
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Find matching index entries
+            results = []
+            keyword_lower = keyword.lower()
+            
+            for link in soup.find_all('a'):
+                text = link.get_text(strip=True)
+                href = link.get('href', '')
+                
+                if keyword_lower in text.lower() and 'reference' in href:
+                    full_url = f"https://docs.manim.community/en/stable/{href}"
+                    if text not in [r[0] for r in results]:  # Avoid duplicates
+                        results.append((text, full_url))
+                        if len(results) >= 10:
+                            break
+            
+            if results:
+                output = f"# Search Results for '{keyword}'\n\n"
+                for name, url in results:
+                    output += f"- **{name}**: {url}\n"
+                return output
+            else:
+                return f"No results found for '{keyword}' in Manim documentation."
+        else:
+            return f"Could not search documentation. HTTP {response.status_code}"
+            
+    except Exception as e:
+        return f"Error searching documentation: {str(e)}"
 
 
 # Test it
 if __name__ == "__main__":
-    import asyncio
+    print("=== Testing Circle ===")
+    result = query_manim_docs("Circle")
+    print(result)
     
-    async def test():
-        print("=== Testing Circle ===")
-        result = await fetch_manim_class_docs("Circle")
-        print(result)
-        
-        print("\n=== Testing Search ===")
-        result = await search_manim_web("transform")
-        print(result)
-    
-    asyncio.run(test())
+    print("\n=== Testing Search ===")
+    result = search_manim_docs("transform")
+    print(result)

@@ -237,6 +237,9 @@ const App: React.FC = () => {
               <input ref={topicInputRef} type="text" value={topicInput} onChange={(e) => setTopicInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleVisualizeClick()} placeholder="ENTER TOPIC TO VISUALIZE..." className="w-full h-full bg-transparent border-none outline-none text-2xl font-black text-center text-white placeholder:text-white/30 uppercase tracking-widest relative z-20 px-12" />
               <div className="absolute right-8 top-1/2 -translate-y-1/2 pointer-events-none opacity-50 z-20"><div className="w-10 h-10 border-2 border-[#f8e16c] rounded flex items-center justify-center text-[#f8e16c] text-xs font-bold font-mono">↵</div></div>
             </div>
+            <div className="absolute top-full left-0 w-full text-center mt-6 opacity-0 group-hover:opacity-100 transition-opacity duration-500 text-[#f8e16c] font-mono text-[10px] tracking-[0.3em]">
+              PRESS <span className="text-white">ENTER</span> TO GENERATE LESSON
+            </div>
           </div>
         </div>
       </div>

@@ -5,11 +5,14 @@ from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.genai import types
 from dotenv import load_dotenv
-from google.adk.models.google_llm import Gemini
-from functools import cached_property
+from google.adk.models.lite_llm import LiteLlm
 from tools.doc_checker import query_manim_docs, search_manim_docs
+from tools.cloud_render import render_manim_code, check_render_status, stitch_cloud_video
 
 load_dotenv()
+
+# Get OpenAI API key from environment
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 def load_prompt(name):
     path = os.path.join(os.path.dirname(__file__), "prompts", f"{name}.md")
@@ -19,54 +22,44 @@ def load_prompt(name):
     return ""
 
 
+# Helper to create OpenAI model via LiteLLM
+def openai_model(model_name: str = "gpt-4o"):
+    """Create an OpenAI model using LiteLLM adapter."""
+    return LiteLlm(
+        model=f"openai/{model_name}",
+        api_key=OPENAI_API_KEY
+    )
 
-class CustomGemini(Gemini):
-    api_key: str
 
-    @cached_property
-    def api_client(self):
-        from google import genai
-        return genai.Client(
-            api_key=self.api_key,
-            http_options=types.HttpOptions(
-                headers=self._tracking_headers(),
-                retry_options=self.retry_options,
-            )
-        )
+# Initialize Agents - ALL using OpenAI now
+# Agent Hierarchy: Central Orchestrator
+# Orchestrator manages optimal flow between specialized agents
 
-# Initialize Agents
-
-tutor = LlmAgent(
-    name="Tutor",
-    model=CustomGemini(
-        api_key=os.getenv("Tutor"), 
-        model="gemini-2.5-flash"),
-    instruction=load_prompt("tutor")
+# 1. Specialized Agents (Leaf nodes)
+manim_coder = LlmAgent(
+    name="ManimCoder",
+    model=openai_model("gpt-5.2"),
+    instruction=load_prompt("manim"),
+    tools=[query_manim_docs, search_manim_docs, render_manim_code, check_render_status, stitch_cloud_video]
 )
 
 script_writer = LlmAgent(
     name="ScriptWriter",
-    model=CustomGemini(
-        api_key=os.getenv("ScriptWriter"), 
-        model="gemini-2.5-flash"),
+    model=openai_model("gpt-4o"),
     instruction=load_prompt("script")
 )
 
-manim_coder = LlmAgent(
-    name="ManimCoder",
-    model=CustomGemini(
-        api_key=os.getenv("ManimCoder"), 
-        model="gemini-2.5-flash"),
-    instruction=load_prompt("manim"),
-    tools=[query_manim_docs, search_manim_docs]
+tutor = LlmAgent(
+    name="Tutor",
+    model=openai_model("gpt-4o"),
+    instruction=load_prompt("tutor")
 )
 
-# Orchestrator
+# 2. Orchestrator (Root)
+# Controls the entire flow and hands off to specialists
 orchestrator = LlmAgent(
     name="Orchestrator",
-    model=CustomGemini(
-        api_key=os.getenv("Orchestrator"), 
-        model="gemini-2.5-flash"),
+    model=openai_model("gpt-4o"),
     instruction=load_prompt("orchestrator"),
     sub_agents=[tutor, script_writer, manim_coder]
 )

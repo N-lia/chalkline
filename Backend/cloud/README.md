@@ -1,115 +1,36 @@
-# Cloud Run Parallel Manim Rendering
+# Blaxel Manim Rendering
 
-## Quick Setup
+This directory contains the worker service for rendering Manim scenes on Blaxel.
 
-### Prerequisites
-- Google Cloud SDK installed (`gcloud`)
-- Docker installed (for local testing)
-- FFmpeg installed (for video stitching)
-- A GCP project with billing enabled
+## Components
+- `worker.py`: FastAPI service that handles `/render` and `/stitch` requests.
+- `Dockerfile`: Builds the environment with Manim, Ffmpeg, and Python dependencies.
 
-### 1. Create GCS Bucket
+## Deployment
+The service is deployed via `blaxel deploy` using the `blaxel.config.yaml` in the parent directory.
 
-```bash
-export PROJECT_ID=$(gcloud config get-value project)
-export BUCKET_NAME="chalkline-render-${PROJECT_ID}"
+## Configuration
+The worker needs access to:
+- GCP Project ID
+- GCS Bucket Name
+- Google Cloud Credentials (via Blaxel secrets or built-in identity)
 
-# Create the bucket
-gsutil mb -l us-central1 gs://${BUCKET_NAME}
+## API Usage
+### Render Scene
+POST `/render`
+```json
+{
+  "bucket": "my-bucket",
+  "script": "script.py",
+  "scene": "SceneName"
+}
 ```
 
-### 2. Build & Push Worker Image
-
-```bash
-cd Backend/cloud
-
-# Build and push to Google Container Registry
-gcloud builds submit --tag gcr.io/${PROJECT_ID}/manim-worker .
-```
-
-### 3. Create Cloud Run Job
-
-```bash
-gcloud run jobs create manim-render-job \
-    --image gcr.io/${PROJECT_ID}/manim-worker \
-    --region us-central1 \
-    --tasks 1 \
-    --memory 2Gi \
-    --cpu 1 \
-    --max-retries 1
-```
-
-### 4. Run the Orchestrator
-
-```bash
-# From Backend directory
-python cloud/orchestrator.py \
-    --project ${PROJECT_ID} \
-    --bucket ${BUCKET_NAME} \
-    --script path/to/manim_script.py \
-    --output final_video.mp4
-```
-
-## Architecture
-
-```
-┌─────────────┐     ┌─────────────────┐
-│ Orchestrator│────▶│   GCS Bucket    │
-│  (Local)    │     │ (Shared Board)  │
-└──────┬──────┘     └────────┬────────┘
-       │                     │
-       │ dispatch            │ read script
-       ▼                     ▼
-┌──────────────────────────────────────┐
-│         Cloud Run Jobs (N)           │
-│  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐ │
-│  │ S1 │ │ S2 │ │ S3 │ │ S4 │ │... │ │
-│  └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ └──┬─┘ │
-└─────│──────│──────│──────│──────│───┘
-      │      │      │      │      │
-      ▼      ▼      ▼      ▼      ▼
-┌─────────────────────────────────────┐
-│   GCS: output/*.mp4 (N videos)      │
-└──────────────────┬──────────────────┘
-                   │ download
-                   ▼
-            ┌─────────────┐
-            │   FFmpeg    │
-            │  (Stitch)   │
-            └──────┬──────┘
-                   │
-                   ▼
-            final_video.mp4
-```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `RENDER_QUALITY` | Manim quality flag | `-pql` (480p) |
-
-Quality options:
-- `-pql` = 480p15 (fastest, for testing)
-- `-pqm` = 720p30
-- `-pqh` = 1080p60 (production)
-- `-pqk` = 2160p60 (4K)
-
-## Troubleshooting
-
-**Job not starting?**
-```bash
-gcloud run jobs executions list --job manim-render-job --region us-central1
-```
-
-**Check logs:**
-```bash
-gcloud run jobs executions logs manim-render-job --region us-central1
-```
-
-**Bucket permissions:**
-```bash
-# Grant Cloud Run service account access
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-    --member="serviceAccount:${PROJECT_ID}@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --role="roles/storage.objectAdmin"
+### Stitch Videos
+POST `/stitch`
+```json
+{
+  "bucket": "my-bucket",
+  "scenes": "Scene1,Scene2,Scene3"
+}
 ```

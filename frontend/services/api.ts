@@ -1,5 +1,5 @@
 
-const API_URL = 'http://localhost:9000/api/agent';
+const API_URL = (import.meta as any).env?.VITE_API_URL || '/api/agent';
 
 export interface AgentResponse {
     explanation: string;

@@ -30,7 +30,7 @@
 }
 
 .laser-btn:hover::before {
-  opacity: 0.3;
+  opacity: 0;
 }
 
 /* Border Beams Container */

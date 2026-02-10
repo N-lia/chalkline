@@ -1,0 +1,23 @@
+api:
+  - name: chalkline-agent
+    runtime: python
+    entrypoint: main:app
+    env:
+      - name: OPENAI_API_KEY
+        value: ${OPENAI_API_KEY}
+      - name: GCP_PROJECT_ID
+        value: ${GCP_PROJECT_ID}
+      - name: GCS_BUCKET_NAME
+        value: ${GCS_BUCKET_NAME}
+      - name: GCS_BUCKET_NAME
+        value: ${GCS_BUCKET_NAME}
+
+  - name: manim-renderer
+    dockerfile: cloud/Dockerfile
+    env:
+      - name: GCP_PROJECT_ID
+        value: ${GCP_PROJECT_ID}
+      - name: GCS_BUCKET_NAME
+        value: ${GCS_BUCKET_NAME}
+      - name: RENDER_QUALITY
+        value: "-pql"

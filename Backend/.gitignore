@@ -1,0 +1,66 @@
+
+# Environment Variables
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Manim/Media Output
+media/
+output/
+videos/
+images/
+*.mp4
+*.png
+*.jpg
+*.gif
+
+# Cloud/Build temporary files
+tmp/
+input.txt
+myscript.py
+final_video.mp4
+cloud/job.yaml
+deploy_cloud.sh
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

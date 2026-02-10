@@ -1,24 +1,50 @@
-"""
-Cloud Run Worker for Manim Rendering
-Downloads a script from GCS, renders a specific scene, uploads the result.
-"""
-
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from pydantic import BaseModel
 import os
 import sys
 import subprocess
 from google.cloud import storage
+import shutil
+
+app = FastAPI()
+
+class RenderRequest(BaseModel):
+    bucket: str
+    script: str
+    scene: str
+
+class StitchRequest(BaseModel):
+    bucket: str
+    scenes: str
+
+@app.post("/render")
+async def render_endpoint(req: RenderRequest, background_tasks: BackgroundTasks):
+    try:
+        background_tasks.add_task(render_scene, req.bucket, req.script, req.scene)
+        return {"status": "accepted", "scene": req.scene, "message": "Render started in background"}
+    except Exception as e:
+        print(f"Error queuing render: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/stitch")
+async def stitch_endpoint(req: StitchRequest, background_tasks: BackgroundTasks):
+    try:
+        background_tasks.add_task(stitch_videos, req.bucket, req.scenes)
+        return {"status": "accepted", "message": "Stitching started in background"}
+    except Exception as e:
+        print(f"Error queuing stitch: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 def render_scene(bucket_name: str, script_blob_name: str, scene_name: str):
     """
     Download script, render one scene, upload the result.
-    
-    Args:
-        bucket_name: GCS bucket name
-        script_blob_name: Path to the script in the bucket
-        scene_name: The specific Scene class to render
     """
-    # 1. Download the script from the "Blackboard"
+    # 1. Download the script
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(script_blob_name)
@@ -27,10 +53,7 @@ def render_scene(bucket_name: str, script_blob_name: str, scene_name: str):
     print(f"✓ Downloaded script from gs://{bucket_name}/{script_blob_name}")
     print(f"🎬 Rendering scene: {scene_name}...")
 
-    # 2. Render ONLY that specific scene
-    # -pql = preview quality low (480p15) - fast for testing
-    # -pqh = preview quality high (1080p30) - for production
-    # -pqk = 4K quality
+    # 2. Render
     quality = os.environ.get("RENDER_QUALITY", "-pql")
     
     result = subprocess.run([
@@ -40,12 +63,11 @@ def render_scene(bucket_name: str, script_blob_name: str, scene_name: str):
     
     if result.returncode != 0:
         print(f"❌ Render failed: {result.stderr}")
-        return
+        raise Exception(f"Manim failed: {result.stderr}")
     
     print(f"✓ Render complete")
 
-    # 3. Find the output video
-    # Manim saves to media/videos/myscript/{quality}/{SceneName}.mp4
+    # 3. Find output
     quality_folders = {
         "-pql": "480p15",
         "-pqm": "720p30", 
@@ -55,7 +77,6 @@ def render_scene(bucket_name: str, script_blob_name: str, scene_name: str):
     quality_folder = quality_folders.get(quality, "480p15")
     output_path = f"./media/videos/myscript/{quality_folder}/{scene_name}.mp4"
     
-    # Fallback: search for the file
     if not os.path.exists(output_path):
         for root, dirs, files in os.walk("./media"):
             for f in files:
@@ -64,27 +85,54 @@ def render_scene(bucket_name: str, script_blob_name: str, scene_name: str):
                     break
     
     if os.path.exists(output_path):
-        # 4. Upload result back to the Bucket
+        # 4. Upload result
         output_blob = bucket.blob(f"output/{scene_name}.mp4")
         output_blob.upload_from_filename(output_path)
         print(f"✓ Uploaded: gs://{bucket_name}/output/{scene_name}.mp4")
     else:
-        print(f"❌ Error: Video file not found at {output_path}")
-        # List what we do have
-        print("Available files in media/:")
-        for root, dirs, files in os.walk("./media"):
-            for f in files:
-                print(f"  {os.path.join(root, f)}")
+        raise Exception(f"Video file not found at {output_path}")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        print("Usage: python worker.py <BUCKET_NAME> <SCRIPT_PATH> <SCENE_NAME>")
-        sys.exit(1)
+def stitch_videos(bucket_name: str, scene_names: str):
+    """
+    Download multiple scene videos and stitch them together.
+    """
+    if not shutil.which("ffmpeg"):
+        raise Exception("ffmpeg not found!")
+
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    scenes = scene_names.split(",")
     
-    # Arguments can be passed comma-separated or as separate args
-    if "," in sys.argv[1]:
-        args = sys.argv[1].split(",")
-        render_scene(args[0], args[1], args[2])
+    print(f"🧵 Stitching {len(scenes)} scenes...")
+    
+    # Prepare list for ffmpeg
+    with open("input.txt", "w") as f:
+        for i, scene in enumerate(scenes):
+            blob_name = f"output/{scene}.mp4"
+            local_path = f"scene_{i}.mp4"
+            
+            blob = bucket.blob(blob_name)
+            if not blob.exists():
+                print(f"⚠️ Warning: {blob_name} does not exist in bucket!")
+                continue
+                
+            blob.download_to_filename(local_path)
+            f.write(f"file '{local_path}'\n")
+            print(f"✓ Downloaded {blob_name}")
+
+    # Run ffmpeg concat
+    print("🎬 Running ffmpeg...")
+    subprocess.run([
+        "ffmpeg", "-f", "concat", "-safe", "0", "-i", "input.txt",
+        "-c", "copy", "final_video.mp4", "-y"
+    ], check=True)
+    
+    if os.path.exists("final_video.mp4"):
+        output_blob = bucket.blob("output/final_video.mp4")
+        output_blob.upload_from_filename("final_video.mp4")
+        print(f"✅ Stitched video uploaded to: gs://{bucket_name}/output/final_video.mp4")
     else:
-        render_scene(sys.argv[1], sys.argv[2], sys.argv[3])
+        raise Exception("Stitching failed - output file not created")
+
+
